@@ -1,12 +1,7 @@
-import torch
-import numpy as np
-
 from ocatari.core import OCAtari
 
-from transformer import Encoder
-
-from wrappers import OCWrapper
-
+from ocrltransformer.wrappers import OCWrapper
+from ocrltransformer.transformer import Encoder
 
 if __name__ == '__main__':
     env = OCAtari("ALE/Pong",
