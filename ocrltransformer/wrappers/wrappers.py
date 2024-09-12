@@ -12,7 +12,8 @@ from ocatari.core import OCAtari
 class OCWrapper(ObservationWrapper):
     def __init__(self, env: OCAtari):
         super().__init__(env)
-        obj_types = Enum('ObjectTypes', list(set(env.reference_list)), start=0)
+        self.reference_list = list(dict.fromkeys(env.reference_list))
+        obj_types = Enum('ObjectTypes', self.reference_list, start=0)
         ones = [obj_types[t].value for t in env.reference_list]
         self.types = np.eye(len(obj_types))[ones]
 
