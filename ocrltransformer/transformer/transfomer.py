@@ -11,11 +11,11 @@ from .sub_layers import (
 
 
 class Encoder(nn.Module):
-    def __init__(self, embed_dim, num_heads, num_blocks, CUDA=False):
+    def __init__(self, embed_dim, num_heads, num_blocks, device="cpu"):
         super(Encoder, self).__init__()
         self.transformer_blocks = nn.ModuleList(
             [
-                TransformerBlock(embed_dim, num_heads, mask=False, CUDA=CUDA)
+                TransformerBlock(embed_dim, num_heads, mask=False, device=device)
                 for _ in range(num_blocks)
             ]
         )
@@ -30,7 +30,7 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, embed_dim, num_heads, num_blocks, vocab_size, CUDA=False):
+    def __init__(self, embed_dim, num_heads, num_blocks, vocab_size, device="cpu"):
         super(Decoder, self).__init__()
         self.multi_head_attention = MultiHeadAttention(
             embed_dim,
@@ -38,11 +38,11 @@ class Decoder(nn.Module):
             embed_dim // num_heads,
             num_heads,
             mask=False,
-            CUDA=CUDA,
+            device=device,
         )
         self.transformer_blocks = nn.ModuleList(
             [
-                TransformerBlock(embed_dim, num_heads, mask=False, CUDA=CUDA)
+                TransformerBlock(embed_dim, num_heads, mask=False, device=device)
                 for _ in range(num_blocks)
             ]
         )
@@ -71,20 +71,19 @@ class TransformerTranslator(nn.Module):
         num_heads,
         encoder_vocab_size,
         output_vocab_size,
-        CUDA=False,
+        device="cpu"
     ):
         super(TransformerTranslator, self).__init__()
 
-        self.encoder_embedding = Embeddings(encoder_vocab_size, embed_dim, CUDA=CUDA)
-        self.output_embedding = Embeddings(output_vocab_size, embed_dim, CUDA=CUDA)
+        self.encoder_embedding = Embeddings(encoder_vocab_size, embed_dim, device=device)
+        self.output_embedding = Embeddings(output_vocab_size, embed_dim, device=device)
 
-        self.encoder = Encoder(embed_dim, num_heads, num_blocks, CUDA=CUDA)
+        self.encoder = Encoder(embed_dim, num_heads, num_blocks, device=device)
         self.decoder = Decoder(
-            embed_dim, num_heads, num_blocks, output_vocab_size, CUDA=CUDA
+            embed_dim, num_heads, num_blocks, output_vocab_size, device=device
         )
 
         self.encoded = False
-        self.device = torch.device("cuda:0" if CUDA else "cpu")
 
     def encode(self, input_sequence):
         embedding = self.encoder_embedding(input_sequence).to(self.device)

@@ -46,17 +46,16 @@ class SelfAttention(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, embed_dim, d_k, d_v, num_heads, mask=False, CUDA=False):
+    def __init__(self, embed_dim, d_k, d_v, num_heads, mask=False, device="cpu"):
         super(MultiHeadAttention, self).__init__()
-        self.CUDA = CUDA
-        self.device = torch.device("cuda:0" if CUDA else "cpu")
+        self.device = device
 
         ### Credit: Issue From @shouldsee https://github.com/IpsumDominum/Pytorch-Simple-Transformer/issues/2
         self.attention_blocks = nn.ModuleList(
             [SelfAttention(embed_dim, d_k, d_v, mask, self.device) for _ in range(num_heads)]
         )
 
-        self.norm = LayerNorm(embed_dim, device=self.device)
+        self.norm = LayerNorm(embed_dim, device=device)
 
     def forward(self, query, key, value, residual_x):
         attention_out = torch.tensor([], requires_grad=True).to(self.device)
@@ -81,7 +80,7 @@ class LayerNorm(nn.Module):
         mean = x.mean(-1, keepdim=True)
         std = x.std(-1, keepdim=True)
         div = (std + self.eps) + self.shift
-        return self.scale * (x - mean) / (div)
+        return self.scale * (x - mean) / div
 
 
 class PositionWiseFeedForward(nn.Module):
@@ -95,16 +94,16 @@ class PositionWiseFeedForward(nn.Module):
         self.device = device
 
     def forward(self, x, residual_x):
-        x = torch.clamp(self.l1(x), 0.0)
+        x = self.l1(x)
         x = self.RELU(x)
-        x = self.l2(x)
         x = self.dropout(x)
+        x = self.l2(x)
         x = self.norm(x + residual_x)
         return x
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, embed_dim, num_heads, mask=False, CUDA=False):
+    def __init__(self, embed_dim, num_heads, mask=False, device="cpu"):
         super(TransformerBlock, self).__init__()
         self.multi_head_attention = MultiHeadAttention(
             embed_dim,
@@ -112,10 +111,10 @@ class TransformerBlock(nn.Module):
             embed_dim // num_heads,
             num_heads,
             mask,
-            CUDA=CUDA,
+            device=device
         )
         self.feed_forward = PositionWiseFeedForward(embed_dim, embed_dim,
-                                                    device=self.multi_head_attention.device)
+                                                    device=device)
 
     def forward(self, query, key, value, residual_x):
         attention_out = self.multi_head_attention(query, key, value, residual_x)
@@ -135,10 +134,10 @@ class VocabLogits(nn.Module):
 class Embeddings(nn.Module):
     "Taken from Annotated Transformer (HarvardNLP)"
 
-    def __init__(self, vocab_length, embed_dim, CUDA=False):
+    def __init__(self, vocab_length, embed_dim, device="cpu"):
         super(Embeddings, self).__init__()
-        self.lut = nn.Embedding(vocab_length, embed_dim)
-        self.pos_encode = PositionalEncoding(embed_dim, CUDA=CUDA)
+        self.lut = nn.Embedding(vocab_length, embed_dim, device=device)
+        self.pos_encode = PositionalEncoding(embed_dim, device=device)
         self.embed_dim = embed_dim
 
     def forward(self, x):
@@ -149,10 +148,10 @@ class Embeddings(nn.Module):
 class PositionalEncoding(nn.Module):
     "Modified From Annotated Transformer (HarvardNLP)"
 
-    def __init__(self, embed_dim, max_len=5000, CUDA=False):
+    def __init__(self, embed_dim, max_len=5000, device="cpu"):
         super(PositionalEncoding, self).__init__()
-        pe = torch.zeros(max_len, embed_dim)
-        position = torch.arange(0, max_len).unsqueeze(1)
+        pe = torch.zeros(max_len, embed_dim).to(device)
+        position = torch.arange(0, max_len).unsqueeze(1).to(device)
         div_term_even = torch.pow(
             10000.0, torch.arange(0, embed_dim, 2, dtype=torch.float32) / embed_dim
         )
@@ -163,8 +162,6 @@ class PositionalEncoding(nn.Module):
         pe[:, 0::2] = torch.sin(position * div_term_even)
         pe[:, 1::2] = torch.cos(position * div_term_odd)
         pe = pe.unsqueeze(0)
-        if CUDA == True:
-            pe.type(torch.cuda.FloatTensor)
         self.register_buffer("pe", pe)
 
     def forward(self, x):
