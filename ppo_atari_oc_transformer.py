@@ -39,7 +39,7 @@ if oc_atari_dir is not None:
 
 from ocatari.core import OCAtari
 from ocrltransformer.wrappers import OCWrapper
-from ocrltransformer.transformer import Encoder
+from torch.nn import TransformerEncoderLayer, TransformerEncoder
 
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -53,7 +53,7 @@ class Args:
     # General
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """the name of this experiment"""
-    seed: int = 69
+    seed: int = 42
     """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
@@ -199,9 +199,12 @@ class PPOAgent(nn.Module):
     def __init__(self, envs, emb_dim, num_heads, num_blocks, device):
         super().__init__()
         dims = envs.observation_space.feature_space.shape
+
+        encoder_layer = TransformerEncoderLayer(emb_dim, num_heads, emb_dim, device=device)
+
         self.network = nn.Sequential(
             nn.Linear(dims[1], emb_dim, device=device),
-            Encoder(emb_dim, num_heads, num_blocks, device=device),
+            TransformerEncoder(encoder_layer, num_blocks),
             nn.Flatten(),
         )
         self.actor = layer_init(nn.Linear(dims[0] * emb_dim, envs.action_space.n, device=device), std=0.01)
