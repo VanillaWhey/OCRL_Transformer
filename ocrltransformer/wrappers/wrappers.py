@@ -14,17 +14,17 @@ class OCWrapper(ObservationWrapper):
         super().__init__(env)
         self.reference_list = list(dict.fromkeys(env.reference_list))
         obj_types = Enum('ObjectTypes', self.reference_list, start=0)
-        ones = [obj_types[t].value for t in env.reference_list]
-        self.types = np.eye(len(obj_types))[ones]
+        self.num_objects = len(obj_types)
 
         old_shape = env.observation_space.shape
-        shape = (old_shape[1], old_shape[0] * old_shape[2] + len(obj_types))
+        shape = (old_shape[1], old_shape[0] * old_shape[2] + self.num_objects)
         self.observation_space = Sequence(Box(0, 255, shape=shape),
                                           stack=True)
 
+        ones = [obj_types[t].value for t in env.reference_list]
+        self.obs = np.eye(self.num_objects, shape[1])[ones]
+
     def observation(self, observation: ObsType) -> WrapperObsType:
         new_obs = np.swapaxes(observation, 0, 1)
-        new_obs = new_obs.reshape(new_obs.shape[0], -1)
-        # new_obs = new_obs[new_obs.sum(axis=1) != 0, :]  # too slow
-        new_obs = np.concatenate((self.types, new_obs), axis=1)
-        return new_obs
+        self.obs[:, self.num_objects:] = new_obs.reshape(new_obs.shape[0], -1)
+        return self.obs
