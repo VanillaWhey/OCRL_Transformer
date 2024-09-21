@@ -200,7 +200,9 @@ class PPOAgent(nn.Module):
         super().__init__()
         dims = envs.observation_space.feature_space.shape
 
-        encoder_layer = TransformerEncoderLayer(emb_dim, num_heads, emb_dim, device=device)
+        encoder_layer = TransformerEncoderLayer(emb_dim, num_heads,
+                                                emb_dim, device=device,
+                                                dropout=0.1, batch_first=True)
 
         self.network = nn.Sequential(
             nn.Linear(dims[1], emb_dim, device=device),
