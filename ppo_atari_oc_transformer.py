@@ -458,11 +458,12 @@ if __name__ == "__main__":
     torch.save(model_data, model_path)
     logger.info(f"model saved to {model_path} in epoch {epoch}")
 
-    artifact = wandb.Artifact('model', type='model')
-    artifact.add_file(model_path)
-    # wandb.log({f"runs/{run_name}/{args.exp_name}": wandb.Video(f"videos/{run_name}")})
-    wandb.log_artifact(artifact)
-    wandb.finish()
+    if args.track:
+        artifact = wandb.Artifact('model', type='model')
+        artifact.add_file(model_path)
+        # wandb.log({f"runs/{run_name}/{args.exp_name}": wandb.Video(f"videos/{run_name}")})
+        wandb.log_artifact(artifact)
+        wandb.finish()
 
     envs.close()
     writer.close()
