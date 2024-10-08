@@ -8,6 +8,11 @@ from gymnasium.core import ObsType, WrapperObsType
 
 from ocatari.core import OCAtari
 
+class SeqSpace(Sequence):
+    @property
+    def shape(self):
+        return self.feature_space.shape
+
 
 class OCWrapper(ObservationWrapper):
     def __init__(self, env: OCAtari):
@@ -18,7 +23,7 @@ class OCWrapper(ObservationWrapper):
 
         old_shape = env.observation_space.shape
         shape = (old_shape[1], old_shape[0] * old_shape[2] + self.num_objects)
-        self.observation_space = Sequence(Box(0, 255, shape=shape),
+        self.observation_space = SeqSpace(Box(0, 255, shape=shape),
                                           stack=True)
 
         ones = [obj_types[t].value for t in env.reference_list]
