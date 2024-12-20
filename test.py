@@ -1,6 +1,11 @@
+import gymnasium as gym
+import ocrltransformer.environments
+
 from ocatari.core import OCAtari
 import torch
 import numpy as np
+
+from matplotlib.pyplot import imshow, draw, pause, show, ion
 
 from torch import nn
 
@@ -11,15 +16,21 @@ from gymnasium import logger
 if __name__ == '__main__':
     logger.set_level(10)
 
-    # env = OCAtari("ALE/Atlantis",
-    #               mode="ram", obs_mode="obj",
-    #               render_mode="human", hud=False)
-    # env = OCWrapper(env)
-    env = OCMultiGame("ALE/Phoenix", "ALE/Assault", "ALE/DemonAttack", "ALE/Galaxian",
-                      exclude="ALE/Assault", wrappers=[OCWrapper],
-                      mode="ram", obs_mode="obj", render_mode="rgb_array", hud=False)
+    env = OCAtari("ALE/Pong", render_mode=None,
+                  mode="ram", obs_mode="masked_dqn", buffer_window_size=1,
+                  render_oc_overlay=True, hud=False, feature_attr="bin")
 
-    print(env.unwrapped.get_action_meanings())
+    env = gym.make("OCTaxi-v0")
+
+    dims = env.observation_space.shape
+
+
+    # env = OCWrapper(env)
+    # env = OCMultiGame("ALE/Phoenix", "ALE/Assault", "ALE/DemonAttack", "ALE/Galaxian",
+    #                   exclude="ALE/Assault", wrappers=[OCWrapper],
+    #                   mode="ram", obs_mode="obj", render_mode="rgb_array", hud=False)
+
+    # print(env.unwrapped.get_action_meanings())
 
     # dims = env.observation_space.feature_space.shape
     #
@@ -41,15 +52,25 @@ if __name__ == '__main__':
     #     emb_dropout=0.1,
     #     channels=4,
     # ).to(device)
+
+    l = nn.Linear(dims[2], 32)
+
     options = {}
     last = 4
     for i in range(last):
         if i == last - 1:
             options["test"] = True
         obs, info = env.reset(options=options)
+        ion()
+        plt = imshow(obs[0], cmap='gray', vmin=0, vmax=255)
+        show()
         done = False
         while not done:
             im = env.render()
+            plt.set_data(obs[0])
+            draw()
+            # o = l(torch.from_numpy(obs / 255.).float())
+            pause(0.001)
             action = env.action_space.sample()
             # cuda_obs = torch.from_numpy(obs).type(torch.float32).unsqueeze(0).to(device)
             # out = vit(obs.unsqueeze(0).view(torch.float32).to(device))
