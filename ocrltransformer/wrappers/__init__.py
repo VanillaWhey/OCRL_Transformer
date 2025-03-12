@@ -1,2 +1,2 @@
-from .wrappers import OCWrapper
+from .wrappers import *
 from.mulit_game_wrapper import OCMultiGame
