@@ -64,6 +64,7 @@ class EgoCentricWrapper(ObservationWrapper):
         self.player_name = player_name
 
         max_objs = get_max_objects(env.game_name, env.hud) # noqa: type(env) == OCAtari
+        self.num_obj = len(max_objs)
         self.max_len = sum(max_objs.values())
         self.feature_size = 4 + len(max_objs) * include_type
         self.object_types =  {k: np.eye(1, self.feature_size, i) for i, k in enumerate(max_objs.keys())}
