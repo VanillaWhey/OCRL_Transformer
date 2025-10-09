@@ -64,9 +64,12 @@ class ObjectLambdaWrapper(ObservationWrapper):
 
 
 class EgoCentricWrapper(ObservationWrapper):
-    def __init__(self, env, player_name="Player", include_type=False,
+    def __init__(self, env, player_name="Player", type_embedding=None,
                  use_polar_coordinates=False, relative_velocity=True):
         super().__init__(env)
+
+        assert type_embedding in [None, "one_hot", "additive"]
+
         self.player_name = player_name
         self.use_polar_coordinates = use_polar_coordinates
         if relative_velocity:
@@ -77,13 +80,21 @@ class EgoCentricWrapper(ObservationWrapper):
         max_objs = get_max_objects(env.game_name, env.hud) # noqa: type(env) == OCAtari
         self.num_obj = len(max_objs)
         self.max_len = sum(max_objs.values())
-        self.feature_size = 4 + len(max_objs) * include_type
-        self.object_types =  {k: np.eye(1, self.feature_size, i) for i, k in enumerate(max_objs.keys())}
+        self.feature_size = 4
+
+        if type_embedding == "one_hot":
+            self.feature_size += self.num_obj
+            self.object_types =  {k: np.eye(1, self.feature_size, i) for i, k in enumerate(max_objs.keys())}
+        elif type_embedding == "additive":
+            self.object_types = {k: positional_encode(self.feature_size, i) for i, k in enumerate(max_objs.keys())}
+        else:
+            self.object_types = {k: np.zeros((1, self.feature_size)) for k in max_objs.keys()}
 
         self.observation_space = Box(-np.inf, np.inf, shape=(self.max_len, self.feature_size))
 
     def observation(self, observation):
         state = np.zeros((self.max_len, self.feature_size))
+        emb = np.zeros((len(self.env.objects), self.feature_size))
         i = 0
         player_idx = -1
         for o in self.env.objects:  # noqa: type(env) == OCAtari
@@ -91,21 +102,25 @@ class EgoCentricWrapper(ObservationWrapper):
                 if player_idx == -1 and o.category == self.player_name:
                     player_pos_v = [o.dx, o.dy, *o.center]
                     player_idx = i
-                state[i] = self.object_types[o.category]
+                emb[i] = self.object_types[o.category]
                 state[i, -4:-2] = o.dx, o.dy
                 state[i, -2:] = o.center
                 i += 1
         if player_idx != -1:  # sometimes the player disappears on termination
             # either calculate relative pos and velocity or just pos
-            state[:, -self.relative_pv_index:] -= player_pos_v[-self.relative_pv_index:]  # noqa: is always set
+            state[:i, -self.relative_pv_index:] -= player_pos_v[-self.relative_pv_index:]  # noqa: is always set
             state[player_idx, -self.relative_pv_index:-2] = player_pos_v[-self.relative_pv_index:-2]
             if self.use_polar_coordinates:
                 # position
-                state[:, -2:] = get_polar_coordinates(state[:, -2:])
+                state[:i, -2:] = get_polar_coordinates(state[:i, -2:])
                 # velocity
-                state[:, -4:-2] = get_polar_coordinates(state[:, -4:-2])
+                state[:i, -4:-2] = get_polar_coordinates(state[:i, -4:-2])
 
             state[player_idx, -2:] = player_pos_v[-2:]
+
+        # object type
+        state[:i] += emb[:i]
+
         return state
 
 
@@ -116,3 +131,11 @@ def get_polar_coordinates(xys):
     polar_coordinates[:, 0] = np.sqrt(np.sum(xys**2, axis=1))
     polar_coordinates[:, 1] = np.arctan2(xys[:, 0], xys[:, 1])  # angle in radians
     return polar_coordinates
+
+
+def positional_encode(d_model, position):
+    pe = np.empty(d_model)
+    div_term = np.exp(np.arange(0, d_model, 2) * (-np.log(10000.0) / d_model))
+    pe[0::2] = np.sin(position * div_term)
+    pe[1::2] = np.cos(position * div_term)
+    return pe
