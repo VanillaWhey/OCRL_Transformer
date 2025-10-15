@@ -56,8 +56,6 @@ class EgoCentricWrapper(ObservationWrapper):
                  include_wh=False):
         super().__init__(env)
 
-        assert type_embedding in [None, "one_hot", "additive"]
-
         self.player_name = player_name
         self.use_polar_coordinates = use_polar_coordinates
         if relative_velocity:
