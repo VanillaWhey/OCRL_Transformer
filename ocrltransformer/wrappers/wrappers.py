@@ -93,7 +93,7 @@ class EgoCentricWrapper(ObservationWrapper):
         i = 0
         player_idx = -1
         for o in self.env.objects:  # noqa: type(env) == OCAtari
-            if not (o is None or o.category == "NoObject"):
+            if not (o is None or "NoObject" in o.category):
                 center_x, center_y = o.center  # only claculate once
                 if o.category == self.player_name and player_idx == -1:
                     player_pos_v = [o.dx, o.dy, center_x, center_y]
