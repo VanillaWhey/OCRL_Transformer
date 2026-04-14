@@ -59,7 +59,7 @@ class ObjectLambdaWrapper(ObservationWrapper):
 class EgoCentricWrapper(ObservationWrapper):
     def __init__(self, env, player_name="Player", type_embedding=None,
                  use_polar_coordinates=False, relative_velocity=True,
-                 include_wh=False, zero_player=False):
+                 include_wh=False, zero_player=False, normalize=False):
         super().__init__(env)
 
         self.player_name = player_name
@@ -78,7 +78,14 @@ class EgoCentricWrapper(ObservationWrapper):
         else:
             self.feature_func = dx_dy_center
 
-        self.netto_feature_size = len(self.feature_func(NoObject()))  # object features only
+        self.zero_player = zero_player
+        self.normaliz = normalize
+        if normalize:
+            self.x, self.y = self.unwrapped.ale.getScreenGrayscale().shape
+        else:
+            self.x, self.y = 1, 1
+
+        self.netto_feature_size = len(self.feature_func(NoObject(), self.x, self.y))  # object features only
         self.brutto_feature_size = self.netto_feature_size  # may include type embedding etc.
 
         if type_embedding == "one_hot":
@@ -93,7 +100,6 @@ class EgoCentricWrapper(ObservationWrapper):
 
         self.observation_space = Box(-np.inf, np.inf, shape=(self.max_len, self.brutto_feature_size))
 
-        self.zero_player = zero_player
 
     def observation(self, observation):
         state = np.zeros((self.max_len, self.brutto_feature_size))
@@ -104,10 +110,15 @@ class EgoCentricWrapper(ObservationWrapper):
             if not (o is None or "NoObject" in o.category):
                 center_x, center_y = o.center  # only calculate once
                 if o.category == self.player_name and player_idx == -1:
-                    player_pos_v = [o.dx, o.dy, center_x, center_y]
+                    player_pos_v = [
+                        o.dx / self.x,
+                        o.dy / self.y,
+                        center_x / self.x,
+                        center_y / self.x
+                    ]
                     player_idx = i
                 emb[i] = self.object_types[o.category]
-                state[i, -self.netto_feature_size:] = self.feature_func(o)
+                state[i, -self.netto_feature_size:] = self.feature_func(o, self.x, self.y)
                 i += 1
         if player_idx != -1:  # sometimes the player disappears on termination
             # either calculate relative pos and velocity or just pos
@@ -218,12 +229,12 @@ def positional_encode(d_model, position):
 
 
 # object feature functions
-def dx_dy_center(o):
+def dx_dy_center(o, x, y):
     center_x, center_y = o.center
-    return o.dx, o.dy, center_x, center_y
+    return o.dx / x, o.dy / y, center_x / x, center_y / y
 
 
 def w_h_dx_dy_center(o):
     center_x, center_y = o.center
     w, h = o.wh
-    return w, h, o.dx, o.dy, center_x, center_y
+    return w / y, h / x, o.dx / x, o.dy / y, center_x / x, center_y / y
