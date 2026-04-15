@@ -170,6 +170,7 @@ class RandomCropWrapper(RandomCrop, ObservationWrapper):
             self.obs = lambda o: o
         elif obs_mode == "dqn":
             self.obs = self.down_scale
+            self._observation_space = gym.spaces.Box(0, 255, (4, 84, 84))
         else:
             raise NotImplementedError(f"obs_mode {obs_mode} is not supported!")
 
