@@ -212,6 +212,12 @@ class RandomCropWrapper(RandomCrop, ObservationWrapper):
         return super(ObservationWrapper, self).__getattr__(name)
 
 
+class ShuffleObjectsWrapper(gym.ObservationWrapper):
+    def observation(self, observation):
+        np.random.shuffle(observation)
+        return observation
+
+
 # xys.shape = (batch, obs, 2)
 def get_polar_coordinates(xys):
     """Returns the polar coordinates of a point."""
