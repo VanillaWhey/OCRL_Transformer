@@ -59,7 +59,8 @@ class ObjectLambdaWrapper(ObservationWrapper):
 class EgoCentricWrapper(ObservationWrapper):
     def __init__(self, env, player_name="Player", type_embedding=None,
                  use_polar_coordinates=False, relative_velocity=True,
-                 include_wh=False, zero_player=False, normalize=False):
+                 include_wh=False, zero_player=False, normalize=False,
+                 offset=(0, 0)):
         super().__init__(env)
 
         self.player_name = player_name
@@ -82,11 +83,13 @@ class EgoCentricWrapper(ObservationWrapper):
             self.feature_func = dx_dy_center
 
         self.zero_player = zero_player
-        self.normaliz = normalize
+        self.normalize = normalize
         if normalize:
             self.x, self.y = self.unwrapped.ale.getScreenGrayscale().shape
         else:
             self.x, self.y = 1, 1
+
+        self.offset = offset
 
         self.netto_feature_size = len(self.feature_func(NoObject(), self.x, self.y))  # object features only
         self.brutto_feature_size = self.netto_feature_size  # may include type embedding etc.
@@ -116,8 +119,8 @@ class EgoCentricWrapper(ObservationWrapper):
                     player_pos_v = [
                         o.dx / self.x,
                         o.dy / self.y,
-                        center_x / self.x,
-                        center_y / self.x
+                        (center_x - self.offset[0]) / self.x,
+                        (center_y - self.offset[1]) / self.y
                     ]
                     player_idx = i
                 emb[i] = self.object_types[o.category]
