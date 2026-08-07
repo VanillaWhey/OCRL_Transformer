@@ -8,7 +8,7 @@ from gymnasium import ObservationWrapper
 from gymnasium.spaces import Sequence, Box
 
 from ocatari.ram.extract_ram_info import get_class_dict, get_max_objects
-from ocatari.ram.game_objects import NoObject
+from ocatari.ram.game_objects import NoObject, GameObject
 from torchvision.transforms import RandomCrop, functional as F
 
 from copy import copy
@@ -69,7 +69,10 @@ class EgoCentricWrapper(ObservationWrapper):
         else:
             self.relative_pv_index = 2
 
-        max_objs = get_max_objects(env.game_name, env.hud) # noqa: type(env) == OCAtari
+        if hasattr(env, "max_objs"):
+            max_objs = env.max_objs
+        else:
+            max_objs = get_max_objects(env.game_name, env.hud) # noqa: type(env) == OCAtari
         self.num_object_types = len(max_objs)
         self.max_len = sum(max_objs.values())
 
@@ -218,6 +221,26 @@ class ShuffleObjectsWrapper(gym.ObservationWrapper):
         return observation
 
 
+class LandmarkWrapper(gym.ObservationWrapper):
+
+    class Landmark(GameObject):
+        def __init__(self, x, y):
+            super().__init__()
+            self.xy = (x, y)
+
+
+    def __init__(self, env, landmarks):
+        super().__init__(env)
+        self.objects = []
+        self.landmarks = [LandmarkWrapper.Landmark(*landmark) for landmark in landmarks]
+        self.max_objs = get_max_objects(env.game_name, env.hud)  # noqa: type(env) == OCAtari
+        self.max_objs["Landmark"] = len(landmarks)
+
+    def observation(self, observation):
+        self.objects = self.env.objects + self.landmarks
+        return observation
+
+
 # xys.shape = (batch, obs, 2)
 def get_polar_coordinates(xys):
     """Returns the polar coordinates of a point."""
@@ -241,7 +264,7 @@ def dx_dy_center(o, x, y):
     return o.dx / x, o.dy / y, center_x / x, center_y / y
 
 
-def w_h_dx_dy_center(o):
+def w_h_dx_dy_center(o, x, y):
     center_x, center_y = o.center
     w, h = o.wh
     return w / y, h / x, o.dx / x, o.dy / y, center_x / x, center_y / y
