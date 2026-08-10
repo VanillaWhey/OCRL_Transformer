@@ -119,12 +119,13 @@ class EgoCentricWrapper(ObservationWrapper):
                     player_pos_v = [
                         o.dx / self.x,
                         o.dy / self.y,
-                        (center_x - self.offset[0]) / self.x,
-                        (center_y - self.offset[1]) / self.y
+                        center_x / self.x,
+                        center_y / self.y
                     ]
                     player_idx = i
                 emb[i] = self.object_types[o.category]
                 state[i, -self.netto_feature_size:] = self.feature_func(o, self.x, self.y)
+                state[i, -2:] -= self.offset
                 i += 1
         if player_idx != -1:  # sometimes the player disappears on termination
             # either calculate relative pos and velocity or just pos
