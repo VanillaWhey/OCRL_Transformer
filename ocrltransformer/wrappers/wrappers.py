@@ -60,7 +60,7 @@ class EgoCentricWrapper(ObservationWrapper):
     def __init__(self, env, player_name="Player", type_embedding=None,
                  use_polar_coordinates=False, relative_velocity=True,
                  include_wh=False, zero_player=False, normalize=False,
-                 offset=(0, 0)):
+                 offset=(0, 0), exclude_classes=()):
         super().__init__(env)
 
         self.player_name = player_name
@@ -90,6 +90,7 @@ class EgoCentricWrapper(ObservationWrapper):
             self.x, self.y = 1, 1
 
         self.offset = offset
+        self.exclude = exclude_classes
 
         self.netto_feature_size = len(self.feature_func(NoObject(), self.x, self.y))  # object features only
         self.brutto_feature_size = self.netto_feature_size  # may include type embedding etc.
@@ -123,6 +124,8 @@ class EgoCentricWrapper(ObservationWrapper):
                         center_y / self.y
                     ]
                     player_idx = i
+                if o.category in self.exclude:
+                    continue
                 emb[i] = self.object_types[o.category]
                 state[i, -self.netto_feature_size:] = self.feature_func(o, self.x, self.y)
                 state[i, -2:] -= self.offset
