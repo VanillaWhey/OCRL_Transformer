@@ -77,7 +77,7 @@ class Args:
     """the frame skipping option of the environment"""
 
     # Tracking
-    track: bool = True
+    track: bool = False
     """if toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "ORBiT"
     """the wandb's project name"""
@@ -370,8 +370,8 @@ if __name__ == "__main__":
                     if "episode" in info:
                         count += 1
                         done_in_episode = True
-                        eorgr += info["episode"]["r"]
-                        elength += info["episode"]["l"]
+                        eorgr += info["episode"]["r"].item()
+                        elength += info["episode"]["l"].item()
 
         # bootstrap value if not done
         with torch.no_grad():

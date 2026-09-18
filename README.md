@@ -5,10 +5,11 @@ This directory contains the source code to replicate our experiments and a GIF v
 
 ## Atari Learning Environment
 
-
+The details of the source code for the Atari experiemnts are in the `atari` folder.
 
 ## Foosball
 
-Details about the Foosball source code and experiments are in the `foosball` folder.
+The details of the Foosball source code and experiments are in the `foosball` folder.
 
+### Foosball: ORBiT 3 vs. ORBiT 2 (Slowed down 3x)
 ![Foosball GIF](gif/foosball.gif)

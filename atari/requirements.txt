@@ -1,0 +1,9 @@
+git+https://github.com/k4ntz/OC_Atari.git
+hackatari
+rtpt
+tqdm
+tyro
+torch
+torchvision
+stable_baselines3
+wandb
