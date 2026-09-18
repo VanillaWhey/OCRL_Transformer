@@ -1,4 +1,4 @@
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_ataripy
+# This file was adapted from https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_atari.py which is published under the MIT license (https://github.com/vwxyzjn/cleanrl/blob/master/LICENSE)
 import os
 import sys
 import tyro
@@ -45,7 +45,7 @@ if oc_atari_dir is not None:
 eval_dir = os.path.join(Path(__file__).parent.parent, "cleanrl_utils/evals/")
 sys.path.insert(1, eval_dir)
 
-from orbit.wrappers import EgoCentricWrapper, LandmarkWrapper
+from atari.orbit import EgoCentricWrapper
 
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -70,20 +70,18 @@ class Args:
     obs_mode: str = "ori"
     """observation mode for OCAtari"""
     backend: int = 0
-    """Which Backend should we use: 0 - OCATARI, 1 - OCALLM, 2 - HACKATARI"""
+    """Which Backend should we use: 0 - OCATARI, 2 - HACKATARI"""
     modifs: str = ""
     """Modifications for Hackatari"""
-    new_rf: str = ""
-    """Path to a new reward functions for OCALM and HACKATARI"""
     frameskip: int = 4
     """the frame skipping option of the environment"""
 
     # Tracking
     track: bool = True
     """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "OCRL_Transformer"
+    wandb_project_name: str = "ORBiT"
     """the wandb's project name"""
-    wandb_entity: str = "AIML_OC"
+    wandb_entity: str = ""
     """the entity (team) of wandb's project"""
     wandb_dir: str = "./wandb"
     """the wandb directory"""
@@ -91,7 +89,7 @@ class Args:
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     ckpt: str = ""
     """Path to a checkpoint to a model to start training from"""
-    author : str = "CD"
+    author : str = ""
     """Initials of the author"""
 
     # Algorithm specific arguments
@@ -128,7 +126,7 @@ class Args:
     target_kl: float = None
     """the target KL divergence threshold"""
 
-    # Transformer
+    # ORBiT
     emb_dim: int = 128
     """input embedding size of the transformer"""
     num_heads: int = 8
@@ -147,19 +145,12 @@ class Args:
     # Wrapper
     player_name: str = ""
     """the name of the player category"""
-    use_polar_coordinates: bool = False
-    """use egocentric polar coordinates instead of cartesian coordinates"""
     type_embedding: Literal[None, "one_hot"] = "one_hot"
     """how the type is embedded into the object vector"""
     include_wh: bool = False
     """use width and height of the objects in addition to position and velocity"""
     normalize_objects: bool = False
     """Normalize position and velocity to [0, 1]"""
-
-    # Ablation
-    landmarks: tuple[tuple[int, int], ...] = ()
-    offset: tuple[int, int] = (0, 0)
-    exclude: tuple[str, ...] = ()
 
     # to be filled in runtime
     batch_size: int = 0
@@ -175,14 +166,8 @@ def make_env(env_id, idx, capture_video, run_dir):
         if args.backend == 2:
             from hackatari.core import HackAtari  # noqa: F401
             env = HackAtari(env_id, modifs=args.modifs.split(" "),
-                            rewardfunc_path=args.new_rf, mode="ram",
-                            hud=False, render_mode="rgb_array",
+                            mode="ram", hud=False, render_mode="rgb_array",
                             render_oc_overlay=False, frameskip=args.frameskip)
-        elif args.backend == 1:
-            from OC_RLLM.ocallm.core import RLLMEnv  # noqa: F401
-            from OC_RLLM.get_reward_function import get_reward_function as grf  # noqa: F401
-            env = RLLMEnv(env_id, "ram", grf(env_id), hud=False,
-                          render_mode="rgb_array", render_oc_overlay=False)
         elif args.backend == 0:
             from ocatari.core import OCAtari
             env = OCAtari(
@@ -197,13 +182,9 @@ def make_env(env_id, idx, capture_video, run_dir):
                                            f"{run_dir}/media/videos",
                                            disable_logger=True)
 
-        if len(args.landmarks) > 0:
-            env = LandmarkWrapper(env, args.landmarks)
-
         env = EgoCentricWrapper(env, args.player_name, type_embedding=args.type_embedding,
                         include_wh=args.include_wh,
-                        normalize=args.normalize_objects,
-                        offset=args.offset, exclude_classes=args.exclude)
+                        normalize=args.normalize_objects)
 
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = NoopResetEnv(env, noop_max=30)
@@ -389,11 +370,7 @@ if __name__ == "__main__":
                     if "episode" in info:
                         count += 1
                         done_in_episode = True
-                        if args.backend == 1 or (args.backend == 2 and args.new_rf):
-                            enewr += info["episode"]["r"]
-                            eorgr += info["org_reward"]
-                        else:
-                            eorgr += info["episode"]["r"]
+                        eorgr += info["episode"]["r"]
                         elength += info["episode"]["l"]
 
         # bootstrap value if not done
@@ -482,8 +459,6 @@ if __name__ == "__main__":
         stats = {"global_step": global_step}
         if done_in_episode:
             pbar.set_description(f"Reward: {eorgr / count:.1f}")
-            if args.new_rf:
-                stats |= {"charts/Episodic_New_Reward": enewr}
             stats |= {
                 "charts/Episodic_Original_Reward": eorgr / count,
                 "charts/Episodic_Length": elength / count,

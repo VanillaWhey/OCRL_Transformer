@@ -174,26 +174,6 @@ class ShuffleObjectsWrapper(gym.ObservationWrapper):
         return observation
 
 
-class LandmarkWrapper(gym.ObservationWrapper):
-
-    class Landmark(GameObject):
-        def __init__(self, x, y):
-            super().__init__()
-            self.xy = (x, y)
-
-
-    def __init__(self, env, landmarks):
-        super().__init__(env)
-        self.objects = []
-        self.landmarks = [LandmarkWrapper.Landmark(*landmark) for landmark in landmarks]
-        self.max_objs = get_max_objects(env.game_name, env.hud)  # noqa: type(env) == OCAtari
-        self.max_objs["Landmark"] = len(landmarks)
-
-    def observation(self, observation):
-        self.objects = self.env.objects + self.landmarks
-        return observation
-
-
 # object feature functions
 def dx_dy_center(o, x, y):
     center_x, center_y = o.center
