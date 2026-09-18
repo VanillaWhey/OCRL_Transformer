@@ -1,0 +1,464 @@
+from omni.kit.viewport.utility import get_viewport_from_window_name
+from omni.isaac.core.prims import RigidPrimView, XFormPrimView
+from omni.isaac.core.articulations import ArticulationView
+from omni.isaac.core.utils.prims import get_prim_at_path
+from omni.isaac.core.utils.torch.maths import *
+import omni.replicator.core as rep
+from pxr import PhysxSchema
+
+from utilities.models.low_level_controllers.polynomial_s_curve import SCurve
+from utilities.models.kalman_filter import KalmanFilter
+from utilities.robots.foosball import Foosball
+from environments.base_task import BaseTask
+
+from PIL import Image
+import numpy as np
+import torch
+import os
+
+
+class FoosballTask(BaseTask):
+
+    def __init__(self, name, sim_config, env, offset=None) -> None:
+        if not hasattr(self, "_num_actions"):
+            # Defines action space for AI
+            self._num_actions = 16
+        if not hasattr(self, "_dof"):
+            # Defines action space for task - Only different for selfplay
+            self._dof = self._num_actions
+        if not hasattr(self, "_num_task_observations"):
+            self._num_task_observations = 4
+        if not hasattr(self, "_num_joint_observations"):
+            # Gripper observed as single boolean joint
+            self._num_joint_observations = 2 * self._num_actions
+        if not hasattr(self, "_num_observations"):
+            self._num_observations = self._num_joint_observations + self._num_task_observations
+        if not hasattr(self, "_num_objects"):
+            # Number of involved figurines + ball
+            self._num_objects = 25
+        if not hasattr(self, "_num_obj_types"):
+            # White, Black, White Goal, Black Goal & Ball
+            self._num_obj_types = 5
+        if not hasattr(self, "_num_obs_per_object"):
+            # X, Y Pos+Vel, Y Rot+Rotvel
+            self._num_obj_features = 6
+
+        BaseTask.__init__(self, name, sim_config, env, offset)
+
+        # Termination conditions
+        self.termination_height = self._env_cfg["terminationHeight"]
+        self.termination_penalty = self._env_cfg["terminationPenalty"]
+        self.stagnation_penalty = self._env_cfg.get("stagnationPenalty", 1000)
+        self.timeout_penalty = self._env_cfg.get("timeoutPenalty", 1000)
+
+        # Win and Loss Rewards
+        self.win_reward = self._env_cfg["winReward"]
+        self.loss_penalty = self._env_cfg["lossPenalty"]
+
+        if not hasattr(self, "kalman"):
+            self.apply_kalman_filter = self._env_cfg.get("applyKalmanFiltering", False)
+        self.initialize_kalman_filter()
+
+        self.observed_dofs = []
+        self.active_joint_dofs = []
+        self.passive_joint_dofs = []
+
+        self._applyKinematicConstraints = self._env_cfg.get("applyKinematicConstraints", False)
+        self.scurve_planner = None
+
+    @property
+    def applyKinematicContraints(self):
+        return self._applyKinematicConstraints and (self.scurve_planner is not None)
+
+    def initialize_kalman_filter(self):
+        if self.apply_kalman_filter:
+            n_obs = self._dof - self.num_actions + 2  # Only on uncontrolled rods and ball
+            self.kalman = KalmanFilter(n_obs, self.num_envs, self._device)
+
+    def set_initial_camera_params(self, camera_position=(0, 0, 10),
+                                  camera_target=(0, 0, 0)):
+        if not self.headless:
+            cam_prim_path = f"/World/envs/env_0/Foosball/Top_Down_Camera"
+            viewport_api_2 = get_viewport_from_window_name("Viewport")
+            viewport_api_2.set_active_camera(cam_prim_path)
+        else:
+            super().set_initial_camera_params(camera_position=camera_position,
+                                              camera_target=camera_target)
+
+    def create_motion_capture_camera(self):
+        cam_prim_path = f"/World/envs/env_0/Foosball/Top_Down_Camera"
+        camera_prim = get_prim_at_path(cam_prim_path)
+        physxRbAPI = PhysxSchema.PhysxRigidBodyAPI.Apply(camera_prim)
+        physxRbAPI.CreateDisableGravityAttr().Set(True)
+        self.camera = RigidPrimView(cam_prim_path)
+
+        cam_pos = self.camera.get_world_poses(clone=False)[0]
+        cam_pos = cam_pos - self._env_pos[0:1] + self._env_pos[256:257]
+        self.camera.set_world_poses(cam_pos)
+
+        lin_vel = torch.tensor([[0, -0.1, 0.1]])
+        ang_vel = torch.tensor([[18, 0, 0]])
+        cam_vel = torch.concatenate((lin_vel, ang_vel), dim=-1)
+        self.camera.set_velocities(cam_vel)
+
+    def set_up_scene(self, scene) -> None:
+        self.get_robot()
+        self.get_game_ball()
+
+        super().set_up_scene(scene)
+
+        # Get robot articulations
+        self._robots = ArticulationView(
+            prim_paths_expr="/World/envs/env_.*/Foosball", name="robot_view", reset_xform_properties=False
+        )
+        scene.add(self._robots)
+
+        # Get ball view
+        self._balls = RigidPrimView(
+            prim_paths_expr="/World/envs/env_.*/Foosball/Ball", name="ball_view", reset_xform_properties=False
+        )
+        scene.add(self._balls)
+        
+        # self.create_motion_capture_camera()
+        
+        physxSceneAPI = PhysxSchema.PhysxSceneAPI.Apply(get_prim_at_path('/physicsScene'))
+        physxSceneAPI.CreateEnableCCDAttr().Set(True)
+
+        # Correct light settings
+        if self._env.render_enabled:
+            light = get_prim_at_path("/World/defaultDistantLight")
+            light.GetAttribute('inputs:intensity').Set(1000)
+
+    def get_robot(self) -> None:
+        self.robot = Foosball(self.default_zero_env_path, device=self.device)
+        self._sim_config.apply_articulation_settings(
+            "Foosball", self.robot.reference, self._sim_config.parse_actor_config("Foosball")
+        )
+        self.rev_joints = self.robot.dof_paths_rev
+        self.pris_joints = self.robot.dof_paths_pris
+
+    def get_game_ball(self) -> None:
+        ball_path = self.default_zero_env_path + "/Foosball/Ball"
+        self._init_ball_position = torch.tensor(
+            [[0, 0, 0.79025]], device=self.device
+        ).repeat(self.num_envs, 1)
+        self._init_ball_rotation = torch.tensor(
+            [[1, 0, 0, 0]], device=self.device
+        ).repeat(self.num_envs, 1)
+        self._init_ball_velocities = torch.zeros((self.num_envs, 6), device=self.device)
+        self._ball_radius = 0.01725
+
+        self._sim_config.apply_articulation_settings(
+            "Ball", get_prim_at_path(ball_path),
+            self._sim_config.parse_actor_config("Ball")
+        )
+
+    def reset_idx(self, env_ids):
+        self.reset_ball(env_ids)
+        BaseTask.reset_idx(self, env_ids)
+        if self.applyKinematicContraints:
+            self.scurve_planner.a0[:] = 0
+
+    def reset_ball(self, env_ids):
+        indices = env_ids.to(dtype=torch.int32)
+        num_resets = len(env_ids)
+
+        # Reset ball to randomized positions and velocities
+        sign = torch.sign(torch.rand(num_resets, device=self.device) - 0.5)
+        init_ball_pos = self._init_ball_position[env_ids].clone()
+        init_ball_rot = self._init_ball_rotation[env_ids].clone()
+        init_ball_pos[..., 1] -= sign * 0.3
+        self._balls.set_world_poses(init_ball_pos + self._env_pos[env_ids], init_ball_rot, indices=indices)
+
+        init_ball_vel = self._init_ball_velocities[env_ids].clone()
+        xvel = torch_rand_float(0.25, 1, (num_resets, 1), self._device).squeeze()
+        xsign = torch.sign(torch.rand(num_resets, device=self.device) - 0.5)
+        init_ball_vel[..., 0] = xsign * xvel
+        init_ball_vel[..., 1] = sign * torch_rand_float(1, 2, (num_resets, 1), self._device).squeeze()
+        init_ball_vel[..., 2:] = 0
+        self._balls.set_velocities(init_ball_vel, indices=indices)
+
+    def get_ball_observation(self):
+        # Observe game ball in x-, y-axis
+        ball_obs = self._balls.get_world_poses(clone=False)[0]
+        ball_obs = ball_obs[:, :2] - self._env_pos[:, :2]
+
+        if self.apply_kalman_filter:
+            self.kalman.predict()
+            kstate = self.kalman.state.clone()
+            ball_pos, ball_vel = kstate[:, :2, 0], kstate[:, 2:, 0] * 60
+            self.kalman.correct(ball_obs.unsqueeze(-1))
+        else:
+            ball_vel = self._balls.get_velocities(clone=False)[:, :2]
+            ball_pos = ball_obs
+
+        return ball_pos, ball_vel
+
+    def get_joint_based_observations(self):
+        # Observe Joints
+        dof_pos = self._robots.get_joint_positions(joint_indices=self.active_joint_dofs, clone=False)
+        dof_vel = self._robots.get_joint_velocities(joint_indices=self.active_joint_dofs, clone=False)
+
+        ball_pos, ball_vel = self.get_ball_observation()
+
+        if len(self.passive_joint_dofs):
+            passive_fig_pos = self._robots.get_joint_positions(joint_indices=self.passive_joint_dofs, clone=False)
+            self.obs_buf = torch.cat(
+                (dof_pos, dof_vel, passive_fig_pos, ball_pos, ball_vel), dim=-1
+            )
+        else:
+            self.obs_buf = torch.cat(
+                (dof_pos, dof_vel, ball_pos, ball_vel), dim=-1
+            )
+
+    def get_obj_centric_observations(self):
+        obj_obs = []
+        for name, value in self.active_rods.items():
+            # TODO: Rescale to table size
+            sign = -1 if 'W' in name else 1  # Joints for black are mirrored so signs are needed
+
+            fig_tpos = self.robot.figure_positions[name][None].repeat_interleave(self.num_envs, 0)
+            fig_tpos[:, 1] += sign * self._robots.get_joint_positions(joint_indices=[value['pris_id']], clone=False)
+
+            dof_rpos = sign * self._robots.get_joint_positions(joint_indices=[value['rev_id']], clone=False)
+            fig_rpos = dof_rpos[..., None].repeat_interleave(fig_tpos.shape[-1], -1)
+
+            fig_tvel = torch.zeros_like(fig_tpos)
+            fig_tvel[:, 1] = sign * self._robots.get_joint_velocities(joint_indices=[value['pris_id']], clone=False)
+
+            dof_rvel = sign * self._robots.get_joint_velocities(joint_indices=[value['rev_id']], clone=False)
+            fig_rvel = dof_rvel[..., None].repeat_interleave(fig_tvel.shape[-1], -1)
+
+            one_hot_encoding = torch.zeros((self.num_envs, self._num_obj_types, fig_tpos.shape[-1]), device=self.device)
+            if 'W' in name:
+                one_hot_encoding[:, 0] = 1
+            elif 'B' in name:
+                one_hot_encoding[:, 1] = 1
+
+            fig_obs = torch.cat((
+                one_hot_encoding, fig_tpos, fig_rpos, fig_tvel, fig_rvel,
+            ), dim=1).transpose(1, 2)
+
+            obj_obs.append(fig_obs)
+
+        ball_obs = torch.zeros((self.num_envs, self._num_obj_features + self._num_obj_types), device=self.device)
+        ball_pos, ball_vel = self.get_ball_observation()
+        ball_obs[..., self._num_obj_types-1] = 1
+        ball_obs[..., self._num_obj_types:self._num_obj_types+2] = ball_pos
+        ball_obs[..., -3:-1] = ball_vel
+        obj_obs.append(ball_obs[:, None])
+
+        obs = torch.cat(obj_obs, dim=1)
+
+        # Center obs around ball
+        obs[:, :-1, self._num_obj_types:self._num_obj_types+2] -= ball_pos[:, None]
+        # velocities toward ball should be positive and vice versa -> NOPE!
+        obs[:, :-1, self._num_obj_types:self._num_obj_types + 2] -= ball_vel[:, None]
+        # obs[:, :-1, -3:-1] *= - torch.sign(obs[:, :-1, self._num_obj_types:self._num_obj_types+2])
+
+        if self.flatten_obs:
+            obs = obs.flatten(start_dim=1)
+
+        self.obs_buf = obs
+
+    def get_observations(self) -> dict:
+        if self.object_centric_obs:
+            self.get_obj_centric_observations()
+        else:
+            self.get_joint_based_observations()
+
+        observations = {
+            self._robots.name: {
+                "obs_buf": self.obs_buf,
+            }
+        }
+
+        if self.capture:
+            self.capture_image()
+        return observations
+
+    def hide_inactive_rods(self):
+        flags = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        for rod_name in self.inactive_rods.keys():
+            if rod_name[-1] == 'W':
+                rod_prim = XFormPrimView(
+                    prim_paths_expr="/World/envs/env_.*/Foosball/White/" + rod_name,
+                    name="rod_view",
+                    reset_xform_properties=False
+                )
+            else:
+                rod_prim = XFormPrimView(
+                    prim_paths_expr="/World/envs/env_.*/Foosball/Black/" + rod_name,
+                    name="rod_view",
+                    reset_xform_properties=False
+                )
+            rod_prim.set_visibilities(flags)
+
+    # def set_gains(self, kps, kds):
+    #     kps = torch.ones(16, device=self.device) * kps
+    #     kds = torch.ones(16, device=self.device) * kds
+    #     self._robots.set_gains(kps=kps, kds=kds, save_to_usd=False)
+
+    def post_reset(self) -> None:
+        BaseTask.post_reset(self)
+
+        self.observed_dofs += self.active_joint_dofs
+
+        rev_joints = {name: self._robots.get_dof_index(name) for name in self.rev_joints}
+        pris_joints = {name: self._robots.get_dof_index(name) for name in self.pris_joints}
+        self.active_rev_joints = {key: value for key, value in rev_joints.items() if value in self.active_joint_dofs}
+        self.active_pris_joints = {key: value for key, value in pris_joints.items() if value in self.active_joint_dofs}
+
+        self.active_rods = {}
+        self.inactive_rods = {}
+        for key, value in pris_joints.items():
+            pris_id = value
+
+            # Get partner joint
+            rod_name = '_'.join(key.split('_')[:2])
+            rev_id = self._robots.get_dof_index(rod_name + "_RevoluteJoint")
+            if (
+                pris_id in self.active_joint_dofs or pris_id in self.passive_joint_dofs or
+                rev_id in self.active_joint_dofs or rev_id in self.passive_joint_dofs
+            ):
+                self.active_rods[rod_name] = {
+                    'pris_id': pris_id,
+                    'rev_id': rev_id,
+                }
+            else:
+                self.inactive_rods[rod_name] = rev_id  # For moving rods out of the way
+
+        self.hide_inactive_rods()
+
+        # Move all hidden rods into horizontal position
+        #   inactive_rods only contains revolute joint ids
+        self._default_joint_pos[:, list(self.inactive_rods.values())] += np.pi/2
+
+        if self._applyKinematicConstraints:
+            self.scurve_planner = SCurve(self.num_envs, self._dof, self.device)
+            vmax = self.robot.qdlim[self.active_joint_dofs].expand(self.num_envs, -1)
+            amax = self.robot.qddlim[self.active_joint_dofs].expand(self.num_envs, -1)
+            jmax = self.robot.qdddlim[self.active_joint_dofs].expand(self.num_envs, -1)
+            self.scurve_planner.set_limits(vmax, amax, jmax)
+            self.set_low_level_controller(self.scurve_planner)
+        # self.set_gains(100_000, 4_000)
+
+        # randomize all envs
+        indices = torch.arange(
+            self._robots.count, dtype=torch.int64, device=self._device
+        )
+        self.reset_idx(indices)
+
+    def _compute_action_regularization(self):
+        # Regularization of actions
+        action_diff = self.actions - self.old_actions
+        action_penalty_w = torch.mean(action_diff[..., :self._num_actions] ** 2, dim=-1)
+        return - action_penalty_w
+
+    def _compute_ball_to_goal_distances(self, ball_pos):
+        # Compute distance ball to goal reward
+        z = torch.zeros_like(ball_pos[:, 1])
+        y_dist = torch.pow(torch.max(torch.abs(ball_pos[:, 1]) - 0.08525, z), 2)
+        x_dist_to_b_goal = torch.pow(ball_pos[:, 0] + 0.61725, 2)
+        x_dist_to_w_goal = torch.pow(ball_pos[:, 0] - 0.61725, 2)
+
+        in_b_goal_mask = torch.min(torch.min(ball_pos[:, 0] < -0.61725, ball_pos[:, 0] > -0.7), y_dist == 0)
+        x_dist_to_b_goal[in_b_goal_mask] = 0
+
+        in_w_goal_mask = torch.min(torch.min(ball_pos[:, 0] > 0.61725, ball_pos[:, 0] < 0.7), y_dist == 0)
+        x_dist_to_w_goal[in_w_goal_mask] = 0
+
+        dist_to_w_goal = torch.sqrt(x_dist_to_w_goal + y_dist)
+        dist_to_b_goal = torch.sqrt(x_dist_to_b_goal + y_dist)
+
+        return dist_to_b_goal, dist_to_w_goal
+
+    def _compute_fig_to_ball_distances(self, ball_pos):
+        # Compute distance of figures to ball in y-direction
+        distances = []
+        for joint, id in self.active_pris_joints.items():
+            if joint in self.robot.dof_paths_W:
+                joint_pos = self._robots.get_joint_positions(joint_indices=[id], clone=False)
+                offsets = self.robot.figure_positions[joint.split('_')[0]]
+                fig_pos = - joint_pos.repeat(1, len(offsets)) + offsets.unsqueeze(0)
+                fig_pos_dist = torch.abs(fig_pos - ball_pos[:, 1:2])
+                distances.append(torch.min(fig_pos_dist, dim=-1)[0])
+        return distances
+
+    def _dist_to_goal_reward(self, ball_pos):
+        dist_to_b_goal, dist_to_w_goal = self._compute_ball_to_goal_distances(ball_pos)
+
+        mid_point_distance = 0.6
+        dist_diff_b = (torch.abs(dist_to_b_goal) - mid_point_distance) / mid_point_distance
+        dist_diff_w = (torch.abs(dist_to_w_goal) - mid_point_distance) / mid_point_distance
+
+        dist_to_b_goal_rew = 10 * (torch.exp(-3*dist_diff_b) - 1)
+        dist_to_w_goal_rew = - 10 * (torch.exp(-3*dist_diff_w) - 1)  # Punish closeness
+        dist_to_goal_rew = dist_to_b_goal_rew + dist_to_w_goal_rew
+        return dist_to_goal_rew
+
+    def _fig_to_ball_reward(self, ball_pos):
+        fig_pos_dist = torch.stack(self._compute_fig_to_ball_distances(ball_pos))
+        fig_pos_rew = - (1 - torch.exp(-6 * fig_pos_dist).mean(0))
+        return fig_pos_rew
+
+    def _calculate_metrics(self):
+        pos = self._balls.get_world_poses(clone=False)[0]
+        ball_pos = pos - self._env_pos
+
+        self.rew_buf[:] = 0
+
+        mask_y = torch.min(-0.0925 < ball_pos[:, 1], ball_pos[:, 1] < 0.0925)
+
+        # Check white goal hit
+        mask_x = 0.61725 < ball_pos[:, 0]
+        losses = torch.min(mask_x, mask_y)
+        self.rew_buf[losses] = - self.loss_penalty
+
+        # Check black goal hit
+        mask_x = ball_pos[:, 0] < -0.61725
+        wins = torch.min(mask_x, mask_y)
+        # win_rew_mask = torch.min(wins, self.progress_buf > 12)
+        self.rew_buf[wins] = self.win_reward
+
+        # Check Termination penalty
+        limit = self._init_ball_position[0, 2] + self.termination_height
+        terminations = ball_pos[:, 2] > limit
+        self.rew_buf[terminations] = - self.termination_penalty
+
+        goal_mask = torch.max(wins, losses)
+
+        mask_z = ball_pos[:, 2] < self._init_ball_position[0, 2] - 0.1
+        mask_x = (-0.62 > ball_pos[:, 1]) | (ball_pos[:, 1] > 0.62)
+        mask_y = (-0.37 > ball_pos[:, 1]) | (ball_pos[:, 1] > 0.37)
+        slips = (mask_x | mask_y | mask_z) & ~goal_mask
+        self.rew_buf[slips] = 0
+
+
+        # Check done flags
+        timeouts = self.progress_buf >= self._max_episode_length - 1
+        self.rew_buf[timeouts] = - self.timeout_penalty
+        self.reset_buf = torch.max(goal_mask, timeouts)
+        self.reset_buf = torch.max(self.reset_buf, terminations)
+        self.reset_buf = torch.max(self.reset_buf, slips)
+
+        # calculate termination rate to log it and plot it
+        if self.reset_buf.sum() > 0:
+            self.extras["Termination Rate"] = terminations.sum() / self.reset_buf.sum()
+        else:
+            self.extras["Termination Rate"] = 0.0
+
+        return wins, losses, timeouts
+
+    def get_camera_sensor(self) -> None:
+        self.rgb_annotators = []
+        self.frame_paths = []
+        for i in range(self.num_envs):
+            frame_path = os.path.join(os.getcwd(), f"runs/{self.name}/capture/Env_{i}")
+            os.makedirs(frame_path, exist_ok=True)
+            self.frame_paths.append(frame_path)
+            camera_path = self.default_zero_env_path[:-1] + f"{i}/Foosball/Top_Down_Camera"
+            rp = rep.create.render_product(camera_path, resolution=(1280, 720))
+            rgb = rep.AnnotatorRegistry.get_annotator("rgb")
+            rgb.attach([rp])
+            self.rgb_annotators.append(rgb)
