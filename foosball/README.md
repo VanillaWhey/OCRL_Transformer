@@ -1,14 +1,12 @@
 # ORBiT Foosball
-This repository is based on https://github.com/Jaykixx/Foosball with the permission to publish this modified code.
-It contains all code to replicate the results presented in the paper, and we provide one trained model for each algorithm for testing.
+This code is based on a prior Foosball codebase, used and modified here with the original authors' permission.
+It contains all code needed to replicate the results presented in the paper, along with one trained model per algorithm for testing.
 
 ## Installation
 Please follow the installation instructions for [OmniIsaacGymEnvs](https://github.com/isaac-sim/OmniIsaacGymEnvs/tree/release/4.0.0) to set up the base environment.
 
 ## Usage
-To run the various training scenarios locate the python executable in Isaac Sim as described in the installation tutorial for [OmniIsaacGymEnvs](https://github.com/isaac-sim/OmniIsaacGymEnvs/tree/release/4.0.0).
-
-Navigate to the project folder.
+To run the various training scenarios, locate the Python executable in Isaac Sim as described in the installation tutorial for [OmniIsaacGymEnvs](https://github.com/isaac-sim/OmniIsaacGymEnvs/tree/release/4.0.0), then navigate to this project's folder.
 
 ### Training
 To start training, run:
@@ -28,7 +26,7 @@ PYTHON_PATH main.py headless=true test=false checkpoint='' num_envs=4096 max_ite
 PYTHON_PATH main.py headless=true test=false checkpoint= num_envs=4096 max_iterations=100_000 seed=1 task.env.stagnationPenalty=150 task.env.lossPenalty=150 task.env.winReward=150 task.env.terminationPenalty=150 task=FoosballMixedSelfPlay task.env.object_centric_obs=false train.params.network.name=actor_critic train.params.network.mlp.units=[256,256,128]
 ```
 
-The execution is otherwise identical to OmniIsaacGymEnvs. For more Information see [Link](https://github.com/isaac-sim/OmniIsaacGymEnvs/tree/release/4.0.0?tab=readme-ov-file#running-the-examples).
+Execution is otherwise identical to OmniIsaacGymEnvs; see its [documentation](https://github.com/isaac-sim/OmniIsaacGymEnvs/tree/release/4.0.0?tab=readme-ov-file#running-the-examples) for more information.
 
 ### Testing
 To execute a test (here PPO vs. ORBiT), run:
