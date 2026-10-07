@@ -149,8 +149,6 @@ class Args:
     """how the type is embedded into the object vector"""
     include_wh: bool = False
     """use width and height of the objects in addition to position and velocity"""
-    normalize_objects: bool = False
-    """Normalize position and velocity to [0, 1]"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -183,8 +181,7 @@ def make_env(env_id, idx, capture_video, run_dir):
                                            disable_logger=True)
 
         env = EgoCentricWrapper(env, args.player_name, type_embedding=args.type_embedding,
-                        include_wh=args.include_wh,
-                        normalize=args.normalize_objects)
+                        include_wh=args.include_wh)
 
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = NoopResetEnv(env, noop_max=30)
