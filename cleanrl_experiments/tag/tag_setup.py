@@ -39,11 +39,13 @@ CONDITIONS = {
 
 # Worlds of the report. "box" (= Box-main, the main results): walled box, 5 distractors, goals flee
 # with weight 0.5. "torus": wrap-around world, 1 distractor, no fleeing; our torus runs only steered
-# (throttle fixed at full). The env defaults are exactly these settings.
+# (throttle fixed at full). The env defaults are exactly these settings. "torus_2d": the same torus
+# with the full 2-d action (throttle, turn), as in the box.
 WORLDS = {
     "box": dict(env_cls=TagBoxVecEnv, env_kwargs={}, fixed_throttle=None),
     "box_heldout": dict(env_cls=TagBoxVecEnv, env_kwargs={"n_distractors": 3}, fixed_throttle=None),
     "torus": dict(env_cls=TagVecEnv, env_kwargs={}, fixed_throttle=1.0),
+    "torus_2d": dict(env_cls=TagVecEnv, env_kwargs={}, fixed_throttle=None),
 }
 
 
