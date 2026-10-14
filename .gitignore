@@ -168,3 +168,4 @@ foosball/runs
 
 # MAC?
 *.DS_Store
+/cleanrl_experiments/cleanrl/test/
