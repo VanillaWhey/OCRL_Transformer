@@ -13,13 +13,13 @@ from rtpt import RTPT
 from pathlib import Path
 from dataclasses import dataclass
 
-from typing import Literal
+from typing import Literal, Optional
 
 import gymnasium as gym
 
-from atari.tag.tag_env import N_CATEGORIES
-from atari.tag.tag_setup import make_vec_env
-from atari.tag.wrappers import SequenzWrapper
+from cleanrl_experiments.tag.tag_env import N_CATEGORIES
+from cleanrl_experiments.tag.tag_setup import make_vec_env
+from cleanrl_experiments.tag.wrappers import TagVecEnvAdapter
 
 # Set CUDA environment variable for determinism
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
@@ -50,7 +50,7 @@ if oc_atari_dir is not None:
 eval_dir = os.path.join(Path(__file__).parent.parent, "cleanrl_utils/evals/")
 sys.path.insert(1, eval_dir)
 
-from atari.atari import EgoCentricWrapper
+from cleanrl_experiments.atari import EgoCentricWrapper
 
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -156,8 +156,8 @@ class Args:
     """use width and height of the objects in addition to position and velocity"""
 
     # Tag
-    num_distractors: int = 1
-    """number of NPC that aren't the goal"""
+    num_distractors: Optional[int] = None
+    """number of NPC that aren't the goal (default: the world's setting, 5 for box, 1 for torus)"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -237,12 +237,13 @@ class PPOAgent(nn.Module):
             self.network.append(nn.Linear(emb_dim, emb_dim, device=device))
             self.network.append(nn.ReLU())
 
-        if type(envs.action_space) == gym.spaces.discrete.Discrete:
+        self.discrete = isinstance(envs.action_space, gym.spaces.Discrete)
+        if self.discrete:
             self.actor = layer_init(nn.Linear(emb_dim, envs.action_space.n, device=device), std=0.01)
             self.get_action_and_value = self.get_action_and_value_discrete
         else:
             self.actor = layer_init(nn.Linear(emb_dim, envs.action_space.shape[0], device=device), std=0.01)
-            self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
+            self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.action_space.shape), device=device))
             self.get_action_and_value = self.get_action_and_value_continuous
 
         self.critic = layer_init(nn.Linear(emb_dim, 1, device=device), std=1)
@@ -280,7 +281,8 @@ class PPOAgent(nn.Module):
 
     def predict(self, x, states=None, **_):
         with torch.no_grad():
-            return np.argmax(self.actor(self.forward(torch.Tensor(x).to(self.device))).cpu().numpy(), axis=1), states
+            out = self.actor(self.forward(torch.Tensor(x).to(self.device))).cpu().numpy()
+            return (np.argmax(out, axis=1) if self.discrete else out), states
 
 
 if __name__ == "__main__":
@@ -325,9 +327,11 @@ if __name__ == "__main__":
 
         num_obj_types = envs.get_attr("num_object_types", 0)[0]
     elif args.env_id.startswith("tag/"):
-        mode = args.env_id.split("/")[1][:-3]
-        envs = make_vec_env(mode, f"{args.player_name}_kinematic" if args.player_name else "abs", args.num_envs)
-        envs = SequenzWrapper(envs)
+        world = args.env_id.split("/")[1].split("-v")[0]  # e.g. tag/box-v0 -> box
+        env_kwargs = {} if args.num_distractors is None else {"n_distractors": args.num_distractors}
+        envs = make_vec_env(world, f"{args.player_name}_kinematic" if args.player_name else "abs",
+                            args.num_envs, seed=args.seed, **env_kwargs)
+        envs = TagVecEnvAdapter(envs)
         num_obj_types = N_CATEGORIES
     else:
         raise NotImplementedError
@@ -440,7 +444,8 @@ if __name__ == "__main__":
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
 
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
+                mb_actions = b_actions.long()[mb_inds] if agent.discrete else b_actions[mb_inds]
+                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], mb_actions)
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -492,7 +497,7 @@ if __name__ == "__main__":
         # Log episode statistics to W&B
         stats = {"global_step": global_step}
         if done_in_episode:
-            pbar.set_description(f"Reward: {eorgr / count:.1f}")
+            pbar.set_description(f"Reward: {eorgr / count:.1f} | Length: {elength / count:.0f}")
             stats |= {
                 "charts/Episodic_Original_Reward": eorgr / count,
                 "charts/Episodic_Length": elength / count,

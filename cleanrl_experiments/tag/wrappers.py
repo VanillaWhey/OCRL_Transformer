@@ -1,5 +1,7 @@
 """Observation wrappers for TagEnv (kept out of the environment on purpose)."""
 
+from __future__ import annotations
+
 import math
 
 import gymnasium as gym
@@ -9,7 +11,7 @@ from gymnasium.utils import seeding
 from gymnasium import spaces
 from gymnasium.vector.utils import batch_space
 
-from atari.tag.tag_env import FEATURES, N_CATEGORIES, OMEGA, THETA, V, X, Y  # TagEnv observation columns (the first N_CATEGORIES = one-hot category)
+from cleanrl_experiments.tag.tag_env import FEATURES, N_CATEGORIES, OMEGA, THETA, V, X, Y  # TagEnv observation columns (the first N_CATEGORIES = one-hot category)
 
 
 def _disp(d, L, periodic=True):
@@ -503,3 +505,36 @@ class SequenzWrapper(gym.ObservationWrapper):
         np.swapaxes(obs, -1, -2)
         return np.reshape(obs, self.shape)
 
+
+class TagVecEnvAdapter:
+    """Gives a tag vector env (gymnasium VectorEnv API) the SB3 VecEnv interface used by the training loop:
+    single observation/action spaces, reset() -> obs, step() -> (obs, reward, done, list of info dicts)."""
+
+    def __init__(self, env):
+        self.env = env
+        self.num_envs = env.num_envs
+        self.observation_space = env.single_observation_space
+        self.action_space = env.single_action_space
+        self._seed = None
+
+    def seed(self, seed):
+        self._seed = seed  # used by the next reset
+
+    def reset(self):
+        obs = self.env.reset(seed=self._seed)
+        self._seed = None
+        return obs
+
+    def step(self, actions):
+        obs, reward, terminated, truncated, infos = self.env.step(actions)
+        done = terminated | truncated
+        list_infos = [{} for _ in range(self.num_envs)]
+        for i in np.flatnonzero(infos.get("_episode", [])):
+            list_infos[i]["episode"] = {"r": infos["episode"]["r"][i], "l": infos["episode"]["l"][i]}
+            list_infos[i]["TimeLimit.truncated"] = bool(truncated[i])
+            if "final_obs" in infos:
+                list_infos[i]["terminal_observation"] = infos["final_obs"][i]
+        return obs, reward, done, list_infos
+
+    def close(self):
+        pass

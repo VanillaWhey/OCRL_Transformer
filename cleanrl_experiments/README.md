@@ -11,7 +11,7 @@ pip install -r requirements.txt
 
 ## Usage
 
-To start a training run on Asterix, run:
+Run all commands from the repository root (the code is imported as the `cleanrl_experiments` package). To start a training run on Asterix, run:
 ```bash
-python cleanrl/ppo_atari_orbit.py --seed 0 --env-id ALE/Asterix-v5 --exp-name ORBiT_Asterix_0 --obs_mode dqn --player_name Player
+python -m cleanrl_experiments.cleanrl.ppo_atari_orbit --seed 0 --env-id ALE/Asterix-v5 --exp-name ORBiT_Asterix_0 --obs_mode dqn --player_name Player
 ```

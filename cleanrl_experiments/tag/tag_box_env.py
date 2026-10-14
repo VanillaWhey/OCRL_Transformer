@@ -32,7 +32,7 @@ from gymnasium import spaces
 from gymnasium.utils import seeding
 from gymnasium.vector.utils import batch_space
 
-from atari.tag.tag_env import CATEGORY_IDS, COLORS, FEATURES, N_CATEGORIES, OMEGA, THETA, V, X, Y, GameObject, wrap_angle
+from cleanrl_experiments.tag.tag_env import CATEGORY_IDS, COLORS, FEATURES, N_CATEGORIES, OMEGA, THETA, V, X, Y, GameObject, wrap_angle
 
 
 class TagBoxVecEnv(gym.vector.VectorEnv):

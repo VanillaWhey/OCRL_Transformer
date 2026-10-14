@@ -14,10 +14,10 @@ Run this file for a quick demo:  python tag_setup.py
 
 import numpy as np
 
-from atari.tag import policies
-from atari.tag.tag_box_env import TagBoxVecEnv
-from atari.tag.tag_env import TagVecEnv
-from atari.tag.wrappers import VecAnchorFrame, VecFixedThrottle, VecKinematicFrame
+from cleanrl_experiments.tag import policies
+from cleanrl_experiments.tag.tag_box_env import TagBoxVecEnv
+from cleanrl_experiments.tag.tag_env import TagVecEnv
+from cleanrl_experiments.tag.wrappers import VecAnchorFrame, VecFixedThrottle, VecKinematicFrame
 
 # The 13 frames of the ablation: name -> (frame, anchor). Anchors are fixed objects: "distractor" is
 # always the first distractor (object id 2), "landmark" the first landmark.

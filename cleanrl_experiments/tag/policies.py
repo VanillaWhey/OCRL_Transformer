@@ -20,7 +20,7 @@ it is not optimal (e.g. it does not lead the goal), so scores above 1 are possib
 
 import numpy as np
 
-from atari.tag.tag_env import TagVecEnv, wrap_angle
+from cleanrl_experiments.tag.tag_env import TagVecEnv, wrap_angle
 
 
 def chase(obs, env, rng):
@@ -61,7 +61,7 @@ def evaluate(policy, episodes: int = 100, seed: int = 12345, wrap=None, env_cls=
     base = env_cls(num_envs=episodes, seed=seed, terminate_on_catch=False, **env_kwargs)
     env = wrap(base) if wrap else base
     rng = np.random.default_rng(seed)
-    obs, _ = env.reset(seed=seed)
+    obs = env.reset(seed=seed)
     catches = np.zeros(episodes)
     for _ in range(base.episode_length):
         obs, reward, _, _, _ = env.step(policy(obs, base, rng))
