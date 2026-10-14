@@ -18,7 +18,7 @@ from typing import Literal, Optional
 import gymnasium as gym
 
 from cleanrl_experiments.tag.tag_env import N_CATEGORIES
-from cleanrl_experiments.tag.tag_setup import make_vec_env
+from cleanrl_experiments.tag.tag_setup import make_vec_env, evaluate as evaluate_tag
 from cleanrl_experiments.tag.wrappers import TagVecEnvAdapter
 
 # Set CUDA environment variable for determinism
@@ -62,7 +62,7 @@ class Args:
     # General
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """the name of this experiment"""
-    seed: int = np.random.randint(np.iinfo(int).max)
+    seed: int = 42
     """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
@@ -97,7 +97,7 @@ class Args:
     author : str = ""
     """Initials of the author"""
 
-    # Algorithm specific arguments
+    # Algorithm-specific arguments
     total_timesteps: int = 10_000_000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
@@ -328,9 +328,9 @@ if __name__ == "__main__":
         num_obj_types = envs.get_attr("num_object_types", 0)[0]
     elif args.env_id.startswith("tag/"):
         world = args.env_id.split("/")[1].split("-v")[0]  # e.g. tag/box-v0 -> box
+        condition = f"{args.player_name}_kinematic" if args.player_name else "abs"
         env_kwargs = {} if args.num_distractors is None else {"n_distractors": args.num_distractors}
-        envs = make_vec_env(world, f"{args.player_name}_kinematic" if args.player_name else "abs",
-                            args.num_envs, seed=args.seed, **env_kwargs)
+        envs = make_vec_env(world, condition, args.num_envs, seed=args.seed, **env_kwargs)
         envs = TagVecEnvAdapter(envs)
         num_obj_types = N_CATEGORIES
     else:
@@ -399,7 +399,6 @@ if __name__ == "__main__":
 
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, next_done, infos = envs.step(action.cpu().numpy())
-            # next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
 
@@ -528,6 +527,14 @@ if __name__ == "__main__":
         "args": vars(args),
     }
     torch.save(model_data, model_path)
+
+    # Final evaluation on tag: 100 full 500-step episodes of the deterministic policy, against random and chase
+    if args.env_id.startswith("tag/"):
+        res = evaluate_tag(lambda o: agent.predict(o)[0], world, condition, **env_kwargs)
+        print(f"{world} / {condition}: agent {res['agent']:.1f}, random {res['random']:.1f}, "
+              f"chase {res['chase']:.1f} catches per episode -> score {res['score']:+.2f}")
+        if args.track:
+            wandb.log({"FinalReward": res["agent"], "FinalScore": res["score"]})
 
     if args.track:
         # model
