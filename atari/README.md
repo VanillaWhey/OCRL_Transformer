@@ -1,6 +1,6 @@
 # ORBiT Atari
 
-This directory contains the code for our Atari experiments. The training script is in the [`cleanrl`](cleanrl) folder and is based on the [CleanRL](https://github.com/vwxyzjn/cleanrl) repository. The main code for the ORBiT architecture and the OARC wrapper is in the [`orbit`](orbit) folder.
+This directory contains the code for our Atari experiments. The training script is in the [`cleanrl`](cleanrl) folder and is based on the [CleanRL](https://github.com/vwxyzjn/cleanrl) repository. The main code for the ORBiT architecture and the OARC wrapper is in the [`orbit`](atari) folder.
 
 ## Installation
 

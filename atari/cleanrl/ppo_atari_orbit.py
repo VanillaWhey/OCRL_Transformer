@@ -17,6 +17,10 @@ from typing import Literal
 
 import gymnasium as gym
 
+from atari.tag.tag_env import N_CATEGORIES
+from atari.tag.tag_setup import make_vec_env
+from atari.tag.wrappers import SequenzWrapper
+
 # Set CUDA environment variable for determinism
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
@@ -25,6 +29,7 @@ import torch.nn as nn
 from torch.nn import TransformerEncoderLayer, TransformerEncoder
 import torch.optim as optim
 
+from torch.distributions import Normal
 from torch.distributions.categorical import Categorical
 
 from stable_baselines3.common.atari_wrappers import (  # isort:skip
@@ -45,7 +50,7 @@ if oc_atari_dir is not None:
 eval_dir = os.path.join(Path(__file__).parent.parent, "cleanrl_utils/evals/")
 sys.path.insert(1, eval_dir)
 
-from atari.orbit import EgoCentricWrapper
+from atari.atari import EgoCentricWrapper
 
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -150,6 +155,10 @@ class Args:
     include_wh: bool = False
     """use width and height of the objects in addition to position and velocity"""
 
+    # Tag
+    num_distractors: int = 1
+    """number of NPC that aren't the goal"""
+
     # to be filled in runtime
     batch_size: int = 0
     """the batch size (computed in runtime)"""
@@ -159,7 +168,7 @@ class Args:
     """the number of iterations (computed in runtime)"""
 
 
-def make_env(env_id, idx, capture_video, run_dir):
+def make_atari_env(env_id, idx, capture_video, run_dir):
     def thunk():
         if args.backend == 2:
             from hackatari.core import HackAtari  # noqa: F401
@@ -227,7 +236,15 @@ class PPOAgent(nn.Module):
         for _ in range(args.num_post_layers):
             self.network.append(nn.Linear(emb_dim, emb_dim, device=device))
             self.network.append(nn.ReLU())
-        self.actor = layer_init(nn.Linear(emb_dim, envs.action_space.n, device=device), std=0.01)
+
+        if type(envs.action_space) == gym.spaces.discrete.Discrete:
+            self.actor = layer_init(nn.Linear(emb_dim, envs.action_space.n, device=device), std=0.01)
+            self.get_action_and_value = self.get_action_and_value_discrete
+        else:
+            self.actor = layer_init(nn.Linear(emb_dim, envs.action_space.shape[0], device=device), std=0.01)
+            self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
+            self.get_action_and_value = self.get_action_and_value_continuous
+
         self.critic = layer_init(nn.Linear(emb_dim, 1, device=device), std=1)
 
 
@@ -242,7 +259,7 @@ class PPOAgent(nn.Module):
     def get_value(self, x):
         return self.critic(self.forward(x))
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value_discrete(self, x, action=None):
         hidden = self.forward(x)
         logits = self.actor(hidden)
         logits[logits.isnan().all(axis=-1)] = 0
@@ -250,6 +267,16 @@ class PPOAgent(nn.Module):
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
+
+    def get_action_and_value_continuous(self, x, action=None):
+        hidden = self.forward(x)
+        action_mean = self.actor(hidden)
+        action_logstd = self.actor_logstd.expand_as(action_mean)
+        action_std = torch.exp(action_logstd)
+        probs = Normal(action_mean, action_std)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(hidden)
 
     def predict(self, x, states=None, **_):
         with torch.no_grad():
@@ -290,10 +317,20 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    envs = SubprocVecEnv(
-        [make_env(args.env_id, i, args.capture_video, writer_dir) for i in range(0, args.num_envs)]
-    )
-    envs = VecNormalize(envs, norm_obs=False, norm_reward=True)
+    if args.env_id.startswith("ALE/"):
+        envs = SubprocVecEnv(
+            [make_atari_env(args.env_id, i, args.capture_video, writer_dir) for i in range(0, args.num_envs)]
+        )
+        envs = VecNormalize(envs, norm_obs=False, norm_reward=True)
+
+        num_obj_types = envs.get_attr("num_object_types", 0)[0]
+    elif args.env_id.startswith("tag/"):
+        mode = args.env_id.split("/")[1][:-3]
+        envs = make_vec_env(mode, f"{args.player_name}_kinematic" if args.player_name else "abs", args.num_envs)
+        envs = SequenzWrapper(envs)
+        num_obj_types = N_CATEGORIES
+    else:
+        raise NotImplementedError
 
     # TRY NOT TO MODIFY: seeding
     os.environ['PYTHONHASHSEED'] = str(args.seed)
@@ -309,7 +346,7 @@ if __name__ == "__main__":
 
     # assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = PPOAgent(envs, args.emb_dim, args.num_heads, args.num_blocks, envs.get_attr("num_object_types", 0)[0], device)
+    agent = PPOAgent(envs, args.emb_dim, args.num_heads, args.num_blocks, num_obj_types, device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
