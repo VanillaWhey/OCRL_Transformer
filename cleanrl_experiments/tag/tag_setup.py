@@ -12,6 +12,8 @@
 Run this file for a quick demo:  python tag_setup.py
 """
 
+import inspect
+
 import numpy as np
 
 from cleanrl_experiments.tag import policies
@@ -40,13 +42,22 @@ CONDITIONS = {
 # Worlds of the report. "box" (= Box-main, the main results): walled box, 5 distractors, goals flee
 # with weight 0.5. "torus": wrap-around world, 1 distractor, no fleeing; our torus runs only steered
 # (throttle fixed at full). The env defaults are exactly these settings. "torus_2d": the same torus
-# with the full 2-d action (throttle, turn), as in the box.
+# with the full 2-d action (throttle, turn), as in the box. "box_torus_like": walls as in the box, but the
+# torus' distractors and goal behaviour (1 distractor, no fleeing) - only the topology differs from torus_2d.
+# (eval_wandb_tag.py evaluates every model in it with the number of distractors and fleeing of its training world.)
 WORLDS = {
     "box": dict(env_cls=TagBoxVecEnv, env_kwargs={}, fixed_throttle=None),
     "box_heldout": dict(env_cls=TagBoxVecEnv, env_kwargs={"n_distractors": 3}, fixed_throttle=None),
     "torus": dict(env_cls=TagVecEnv, env_kwargs={}, fixed_throttle=1.0),
     "torus_2d": dict(env_cls=TagVecEnv, env_kwargs={}, fixed_throttle=None),
+    "box_torus_like": dict(env_cls=TagBoxVecEnv, env_kwargs={"n_distractors": 1, "npc_flee": 0.0}, fixed_throttle=None),
 }
+
+
+def world_setting(world, key):
+    """Effective value of the env parameter ``key`` (e.g. n_distractors, npc_flee) in ``world``."""
+    w = WORLDS[world]
+    return w["env_kwargs"].get(key, inspect.signature(w["env_cls"]).parameters[key].default)
 
 
 def anchor_id(anchor, n_distractors):
