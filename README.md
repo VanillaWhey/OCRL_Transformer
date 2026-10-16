@@ -8,16 +8,20 @@ This directory contains the source code required to replicate our experiments, a
 
 ```
 .
-├── cleanrl_experiments/  # ORBiT (CleanRL PPO) on the Atari Learning Environment and Tag
+├── cleanrl_experiments/  # ORBiT (CleanRL PPO) on the Arcade Learning Environment and Tag
 ├── foosball/             # ORBiT and baselines on the Foosball robotic task
-└── gif/                  # Foosball rollout video referenced below
+└── gif/                  # Foosball rollout GIF shown below
 ```
 
-Each experiment folder is self-contained, with its own installation instructions, dependencies, and usage examples.
+Each experiment folder has its own installation instructions, dependencies, and usage examples.
 
-## Atari Learning Environment
+## Arcade Learning Environment
 
-We evaluate ORBiT on the Atari Learning Environment, building on an object-centric observation wrapper and a PPO training loop. Source code and instructions for the Atari experiments are in the [`cleanrl_experiments`](cleanrl_experiments/README.md) folder.
+We evaluate ORBiT on Atari games from the Arcade Learning Environment, using an object-centric observation wrapper and a PPO training loop. Source code and instructions for the Atari experiments are in the [`cleanrl_experiments`](cleanrl_experiments/README.md) folder.
+
+## Tag
+
+We study how the choice of reference frame affects learning in Tag, an object-centric pursuit task in which the agent has to catch a goal among look-alike distractors. The Tag environment is in [`cleanrl_experiments/tag`](cleanrl_experiments/tag/README.md) and uses the same training scripts as the Atari experiments.
 
 ## Foosball
 

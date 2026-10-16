@@ -1,4 +1,5 @@
 git+https://github.com/k4ntz/OC_Atari.git
+gymnasium[atari]==0.29.1
 hackatari
 rtpt
 tqdm
