@@ -146,7 +146,7 @@ class Args:
 
     # Tag
     num_distractors: Optional[int] = None
-    """number of NPC that aren't the goal (default: the world's setting, 5 for box, 1 for torus)"""
+    """number of NPC that aren't the goal (default: the world's setting, 5 for box, 3 for box_heldout)"""
 
     # to be filled in runtime
     batch_size: int = 0
