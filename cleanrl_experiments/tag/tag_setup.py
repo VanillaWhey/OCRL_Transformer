@@ -20,24 +20,13 @@ import numpy as np
 
 from cleanrl_experiments.tag import policies
 from cleanrl_experiments.tag.tag_box_env import TagBoxVecEnv
-from cleanrl_experiments.tag.tag_env import TagVecEnv
 from cleanrl_experiments.tag.wrappers import VecAnchorFrame, VecFixedThrottle, VecKinematicFrame
 
-# The 13 frames of the ablation: name -> (frame, anchor). Anchors are fixed objects: "distractor" is
-# always the first distractor (object id 2), "landmark" the first landmark.
 CONDITIONS = {
     "abs": ("absolute", None),
-    "agent_rotated": ("rotated", "agent"),
-    "agent_translated": ("translated", "agent"),
     "agent_kinematic": ("kinematic", "agent"),
-    "goal_rotated": ("rotated", "goal"),
-    "goal_translated": ("translated", "goal"),
     "goal_kinematic": ("kinematic", "goal"),
-    "distractor_rotated": ("rotated", "distractor"),
-    "distractor_translated": ("translated", "distractor"),
     "distractor_kinematic": ("kinematic", "distractor"),
-    "landmark_rotated": ("rotated", "landmark"),
-    "landmark_translated": ("translated", "landmark"),
     "landmark_kinematic": ("kinematic", "landmark"),
 }
 
@@ -50,9 +39,6 @@ CONDITIONS = {
 WORLDS = {
     "box": dict(env_cls=TagBoxVecEnv, env_kwargs={}, fixed_throttle=None),
     "box_heldout": dict(env_cls=TagBoxVecEnv, env_kwargs={"n_distractors": 3}, fixed_throttle=None),
-    "torus": dict(env_cls=TagVecEnv, env_kwargs={}, fixed_throttle=1.0),
-    "torus_2d": dict(env_cls=TagVecEnv, env_kwargs={}, fixed_throttle=None),
-    "box_torus_like": dict(env_cls=TagBoxVecEnv, env_kwargs={"n_distractors": 1, "npc_flee": 0.0}, fixed_throttle=None),
 }
 
 
@@ -76,7 +62,7 @@ def _load_baselines():
         return {}
 
 
-def baseline(name, episodes=100, seed=12345, env_cls=TagVecEnv, **env_kwargs):
+def baseline(name, episodes=100, seed=12345, env_cls=TagBoxVecEnv, **env_kwargs):
     """Mean catches per full episode of the reference policy ``name`` ("random" or "chase"), read from
     baselines.json, or evaluated and added to it if this setting is not in it yet."""
     params = {k: p.default for k, p in inspect.signature(env_cls).parameters.items() if k not in _NOT_ENV_PARAMS}
