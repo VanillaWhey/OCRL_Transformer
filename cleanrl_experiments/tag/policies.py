@@ -58,6 +58,12 @@ def evaluate(policy, episodes: int = 100, seed: int = 12345, wrap=None, env_cls=
     all run in parallel. ``wrap(env)`` adds wrappers (e.g. frames for a learned policy); env_kwargs go
     to TagVecEnv (world_size, n_distractors, ...); env_cls=tag_box_env.TagBoxVecEnv for the walled box.
     Same seed -> same initial states for every policy."""
+    return float(evaluate_episodes(policy, episodes, seed, wrap, env_cls, **env_kwargs).mean())
+
+
+def evaluate_episodes(policy, episodes: int = 100, seed: int = 12345, wrap=None, env_cls=TagVecEnv,
+                      **env_kwargs) -> np.ndarray:
+    """Like evaluate, but the catches of every single episode, shape (episodes,)."""
     base = env_cls(num_envs=episodes, seed=seed, terminate_on_catch=False, **env_kwargs)
     env = wrap(base) if wrap else base
     rng = np.random.default_rng(seed)
@@ -66,7 +72,7 @@ def evaluate(policy, episodes: int = 100, seed: int = 12345, wrap=None, env_cls=
     for _ in range(base.episode_length):
         obs, reward, _, _, _ = env.step(policy(obs, base, rng))
         catches += reward
-    return float(catches.mean())
+    return catches
 
 
 def score(catches: float, random_catches: float, chase_catches: float) -> float:

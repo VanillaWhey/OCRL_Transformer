@@ -3,21 +3,22 @@
 For every finished run on a tag env, the latest model artifact is downloaded and evaluated (deterministic policy,
 full 500-step re-spawning episodes) with several numbers of distractors, next to the random and chase policies:
 
-    <prefix>/<n>_distractors/{agent,random,chase,score}    for every evaluated number of distractors n
-    <prefix>/{agent,random,chase,score}                    the training setting
+    <prefix>/<n>_distractors/{agent,score}    for every evaluated number of distractors n
+    <prefix>/{agent,score}                    the training setting
 
 With --eval-worlds the model is also evaluated in other worlds (transfer), each with one number of distractors:
 
-    <prefix>/<world>/<n>_distractors/{agent,random,chase,score}
+    <prefix>/<world>/<n>_distractors/{agent,score}
 
 There, n and the goals' fleeing are the world's own settings, except in box_torus_like, which takes both from the
 training world (so only the walls differ from training on the torus). Worlds with a different action space
 (torus: steering only) are skipped.
 
-agent/random/chase are catches per episode, score = (agent - random) / (chase - random). PPObj flattens a fixed
+agent is catches per episode, score = (agent - random) / (chase - random); random and chase do not depend on the
+model, so they are only printed (they are stored in tag/baselines.json, not in the runs). PPObj flattens a fixed
 number of objects, so it is only evaluated with its training number of distractors.
 
-    python -m cleanrl_experiments.cleanrl.eval_wandb_tag -p OCRL_Transformer PPObj-v2 -d 1 3 5 8 10         --eval-worlds box torus_2d box_torus_like --test
+    python -m cleanrl_experiments.eval.eval_wandb_tag -p OCRL_Transformer PPObj-v2 -d 1 3 5 8 10 --eval-worlds box torus_2d box_torus_like --test
 """
 import argparse
 import os
@@ -27,8 +28,33 @@ import wandb
 import yaml
 from rtpt import RTPT
 
-from cleanrl_experiments.cleanrl.eval_tag import load_agent
+from cleanrl_experiments.eval.eval_tag import load_agent
 from cleanrl_experiments.tag.tag_setup import WORLDS, evaluate, world_setting
+
+# Results written to the W&B runs (random and chase are the same for every model)
+UPLOADED = ("agent", "score")
+
+
+def download_model(run, model_dir, indentation="  "):
+    """Path of the run's latest model artifact, downloaded to <model_dir>/<run id>.cleanrl_model if not there yet;
+    None if the run has no model artifact."""
+    new_path = os.path.join(model_dir, f"{run.id}.cleanrl_model")
+    if os.path.exists(new_path):
+        return new_path
+    # Latest model artifact of the run (the final model is logged last)
+    artifacts = sorted((a for a in run.logged_artifacts() if a.type == "model"),
+                       key=lambda a: a.updated_at, reverse=True)
+    if not artifacts:
+        print(f"{indentation}No model artifact found for run {run.name}")
+        return None
+    artifact = artifacts[0]
+    print(f"{indentation}Downloading artifact: {artifact.name}")
+
+    # Download artifact to the output directory and rename the model file
+    artifact_dir = artifact.download(root=os.path.join(model_dir, run.id))
+    os.replace(os.path.join(artifact_dir, list(artifact.manifest.entries.keys())[0]), new_path)
+    print(f"{indentation}Saved to: {new_path}")
+    return new_path
 
 
 class ParseKwargs(argparse.Action):
@@ -55,7 +81,7 @@ if __name__ == '__main__':
     argsparser.add_argument('--no-re-eval', action='store_false', dest="re_eval",
                             help="skip runs whose model was already downloaded")
     argsparser.add_argument('--prefix', type=str, default="eval")
-    argsparser.add_argument('--base_dir', type=str, default="./test")
+    argsparser.add_argument('--base_dir', type=str, default="results", help="downloaded models go to <base_dir>/models")
     argsparser.add_argument('--device', type=str, default="cpu")
     args = argsparser.parse_args()
     print(args)
@@ -91,31 +117,15 @@ if __name__ == '__main__':
         for run in runs:
             print(f"Processing run: {run.name}")
 
-            # Define a new name for the model
-            new_name = f"{run.id}.cleanrl_model"
-            new_path = os.path.join(model_dir, new_name)
-
             # skip if already done
-            if os.path.exists(new_path):
-                if not args.re_eval:
-                    print(f"{indentation}File {new_path} already exists. Skipping it!")
-                    rtpt.step()
-                    continue
-            else:
-                # Latest model artifact of the run (the final model is logged last)
-                artifacts = sorted((a for a in run.logged_artifacts() if a.type == "model"),
-                                   key=lambda a: a.updated_at, reverse=True)
-                if not artifacts:
-                    print(f"{indentation}No model artifact found for run {run.name}")
-                    rtpt.step()
-                    continue
-                artifact = artifacts[0]
-                print(f"{indentation}Downloading artifact: {artifact.name}")
-
-                # Download artifact to the output directory and rename the model file
-                artifact_dir = artifact.download(root=os.path.join(model_dir, run.id))
-                os.replace(os.path.join(artifact_dir, list(artifact.manifest.entries.keys())[0]), new_path)
-                print(f"{indentation}Saved to: {new_path}")
+            if os.path.exists(os.path.join(model_dir, f"{run.id}.cleanrl_model")) and not args.re_eval:
+                print(f"{indentation}Model of {run.id} already downloaded. Skipping it!")
+                rtpt.step()
+                continue
+            new_path = download_model(run, model_dir, indentation)
+            if new_path is None:
+                rtpt.step()
+                continue
 
             agent, world, condition, n_train, fixed_objects = load_agent(new_path, args.device)
 
@@ -139,6 +149,8 @@ if __name__ == '__main__':
             for n in sorted(set(args.distractors) | {n_train}):
                 res = run_eval(world, n, " (training)" if n == n_train else "")
                 for key, value in (res or {}).items():
+                    if key not in UPLOADED:
+                        continue
                     summary[f"{args.prefix}/{n}_distractors/{key}"] = value
                     if n == n_train:
                         summary[f"{args.prefix}/{key}"] = value
@@ -156,7 +168,8 @@ if __name__ == '__main__':
                     n, env_kwargs = world_setting(eval_world, "n_distractors"), {}
                 res = run_eval(eval_world, n, **env_kwargs)
                 for key, value in (res or {}).items():
-                    summary[f"{args.prefix}/{eval_world}/{n}_distractors/{key}"] = value
+                    if key in UPLOADED:
+                        summary[f"{args.prefix}/{eval_world}/{n}_distractors/{key}"] = value
 
             if not args.test:
                 for key, value in summary.items():

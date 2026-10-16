@@ -13,6 +13,8 @@ Run this file for a quick demo:  python tag_setup.py
 """
 
 import inspect
+import json
+import os
 
 import numpy as np
 
@@ -60,6 +62,40 @@ def world_setting(world, key):
     return w["env_kwargs"].get(key, inspect.signature(w["env_cls"]).parameters[key].default)
 
 
+# Catches per episode of the reference policies, which do not depend on the agent: computed once per setting
+# and stored in this file (keyed by policy, env class, every env parameter, episodes and seed).
+BASELINES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "baselines.json")
+_NOT_ENV_PARAMS = ("num_envs", "seed", "terminate_on_catch", "autoreset")
+
+
+def _load_baselines():
+    try:
+        with open(BASELINES_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def baseline(name, episodes=100, seed=12345, env_cls=TagVecEnv, **env_kwargs):
+    """Mean catches per full episode of the reference policy ``name`` ("random" or "chase"), read from
+    baselines.json, or evaluated and added to it if this setting is not in it yet."""
+    params = {k: p.default for k, p in inspect.signature(env_cls).parameters.items() if k not in _NOT_ENV_PARAMS}
+    params.update(env_kwargs)
+    key = json.dumps({"policy": name, "env": env_cls.__name__, "episodes": episodes, "seed": seed, **params},
+                     sort_keys=True)
+    cached = _load_baselines()
+    if key in cached:
+        return cached[key]
+    value = policies.evaluate(policies.POLICIES[name], episodes, seed, env_cls=env_cls, **env_kwargs)
+    cached = _load_baselines()  # re-read: another process may have added settings meanwhile
+    cached[key] = value
+    tmp = f"{BASELINES_PATH}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cached, f, indent=1, sort_keys=True)
+    os.replace(tmp, BASELINES_PATH)  # atomic, so concurrent readers never see a half-written file
+    return value
+
+
 def anchor_id(anchor, n_distractors):
     """Object id of the anchor: 0 agent, 1 goal, 2 first distractor, 2 + n_distractors first landmark."""
     return {"agent": 0, "goal": 1, "distractor": 2, "landmark": 2 + n_distractors}[anchor]
@@ -105,13 +141,13 @@ def encode_obs(obs, env):
 def evaluate(act, world, condition, episodes=100, seed=12345, **env_kwargs):
     """Catches per full 500-step re-spawning episode of ``act(obs) -> actions`` (deterministic policy;
     obs as from make_vec_env, actions (episodes, action_dim)), of random and of chase on the same
-    episodes, and score = (agent - random) / (chase - random)."""
+    episodes, and score = (agent - random) / (chase - random). random and chase come from baselines.json."""
     w = WORLDS[world]
     kw = dict(w["env_kwargs"], **env_kwargs)
     res = {"agent": policies.evaluate(lambda obs, env, rng: act(obs), episodes, seed,
                                       wrap=lambda e: wrap(e, condition, w["fixed_throttle"]), env_cls=w["env_cls"], **kw)}
     for name in ("random", "chase"):
-        res[name] = policies.evaluate(policies.POLICIES[name], episodes, seed, env_cls=w["env_cls"], **kw)
+        res[name] = baseline(name, episodes, seed, env_cls=w["env_cls"], **kw)
     res["score"] = policies.score(res["agent"], res["random"], res["chase"])
     return res
 

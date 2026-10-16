@@ -3,7 +3,7 @@
 Runs the deterministic policy (action mean) on 100 full 500-step re-spawning episodes and reports catches per
 episode next to the random and chase (expert) policies, and score = (agent - random) / (chase - random).
 
-    python -m cleanrl_experiments.cleanrl.eval_tag <path/to/model.cleanrl_model> [n_distractors]
+    python -m cleanrl_experiments.eval.eval_tag <path/to/model.cleanrl_model> [n_distractors]
 """
 import sys
 from types import SimpleNamespace
